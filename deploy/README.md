@@ -17,11 +17,17 @@
 - Mandatory `/var/run` locks (global + per-host) owned by `centos`.
 - Automatic reverse-order rollback with manual-intervention alerts if recovery fails.
 - Strict SSH model: connect as `deploy-user`, switch to `centos`, `StrictHostKeyChecking=yes` enforced.
-- Validation helpers (checksums, xmllint XML edits, curl health checks, permission audits).
+- Validation helpers (checksums, xmllint XML edits, pluggable health checks via URL or arbitrary bash commands, permission audits).
+- Optional artifact signing checks (`*.sha256`, `*.asc`, `*.sig`) enforced before changes.
+- Shellcheck CI workflow (`.github/workflows/shellcheck.yml`) linting every `deploy/**/*.sh` change.
 - Append-only audit trail at `state/deployments.log` plus per-host logs in `tmp/`.
 
 📸 **Screenshots / GIFs**
-- CLI-only workflow. If you capture terminal recordings (e.g., asciinema), link or embed them here.
+- CLI-first workflow. Replay the bundled asciinema demo:
+
+```bash
+asciinema play docs/demos/dry-run-rollback.cast
+```
 
 ⚡ **Quick start**
 
@@ -32,6 +38,7 @@ cd deploy
 # 1. Prepare artifacts and inventory
 ls artifacts/                # ensure JARs / ZIPs are in place
 cat inventory/prod.env       # confirm ALL target hosts
+# (Optional) place matching *.sha256 or *.asc files next to artifacts for signature enforcement
 
 # 2. Dry run (no remote writes)
 ./deploy.sh inventory/prod.env loan-service 1.2.5 --dry-run
@@ -56,17 +63,19 @@ jump server (deploy.sh)
 ```
 
 🛡️ **Security / limitations**
-- Requires `deploy-user` → `sudo -u centos` without password; sudo allowlist is validated heuristically (harden `lib/security.sh` to match your policy).
-- Assumes remote hosts provide `bash`, `tar`, `xmllint`, `curl`, `unzip`, `sha256sum`.
+- Requires `deploy-user` → `sudo -u centos` without password; `lib/security.sh` parses the remote sudoers allowlist and rejects targets/commands outside the allowed set (default: `centos` + standard bash binaries). Override `ALLOWED_SUDO_TARGETS`/`ALLOWED_SUDO_COMMANDS` if your policy differs.
+- Assumes remote hosts provide `bash`, `tar`, `xmllint`, `curl`, `unzip`, `sha256sum`, `base64`; GPG verification additionally requires `gpg`.
 - Dry-run is read-only but doesn’t verify artifact presence on remote hosts (happens during real run prechecks).
 - Locks under `/var/run` must be cleared manually if a host crashes mid-deploy.
 
 🗺️ **Roadmap**
-- [ ] Add shellcheck CI to lint step scripts automatically.
-- [ ] Support pluggable health-check commands per app (not just HTTP via curl).
-- [ ] Optionally sign artifacts (GPG/SHA) before shipping to hosts.
-- [ ] Provide asciinema demo of dry-run + rollback scenario.
-- [ ] Harden `lib/security.sh` to parse sudoers allowlists explicitly.
+- [x] Add shellcheck CI to lint step scripts automatically.
+- [x] Support pluggable health-check commands per app (not just HTTP via curl).
+- [x] Optionally sign artifacts (GPG/SHA) before shipping to hosts.
+- [x] Provide asciinema demo of dry-run + rollback scenario.
+- [x] Harden `lib/security.sh` to parse sudoers allowlists explicitly.
+- [ ] Add automated rollback smoke-test harness (simulated failure) in CI.
+- [ ] Expose health-check suites in `deploy.conf` with per-step timeouts & thresholds.
 
 📚 **More docs**
 - `IMPLEMENTATION.md` — deep dive into architecture, locking, and rollback design.

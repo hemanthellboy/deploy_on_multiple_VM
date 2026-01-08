@@ -59,3 +59,43 @@ health_check_url() {
   fi
   return 0
 }
+
+health_check_command() {
+  local command="$1"
+  if [[ -z "$command" ]]; then
+    echo "HEALTH_CHECK_COMMAND_EMPTY" >&2
+    return 1
+  fi
+  if ! bash -o pipefail -c "$command" >/dev/null 2>&1; then
+    echo "HEALTH_CHECK_COMMAND_FAILED: $command" >&2
+    return 1
+  fi
+  return 0
+}
+
+run_health_check_spec() {
+  local spec="$1"
+  if [[ -z "$spec" ]]; then
+    echo "EMPTY_HEALTH_CHECK_SPEC" >&2
+    return 1
+  fi
+
+  local type="${spec%%:*}"
+  local value="${spec#*:}"
+  if [[ "$type" == "$value" ]]; then
+    value=""
+  fi
+
+  case "$type" in
+    url)
+      health_check_url "$value"
+      ;;
+    command)
+      health_check_command "$value"
+      ;;
+    *)
+      echo "UNKNOWN_HEALTH_CHECK: $spec" >&2
+      return 1
+      ;;
+  esac
+}

@@ -21,10 +21,19 @@ execute() {
     validate_xml "$XML_PATH" || return 1
   fi
 
-  # health check
-  if [[ -n "${HEALTH_URL:-}" ]]; then
-    health_check_url "$HEALTH_URL" || return 1
+  local checks=()
+  if declare -p HEALTH_CHECKS >/dev/null 2>&1; then
+    checks=("${HEALTH_CHECKS[@]}")
   fi
+  if [[ ${#checks[@]} -eq 0 && -n "${HEALTH_URL:-}" ]]; then
+    checks=("url:${HEALTH_URL}")
+  fi
+
+  local spec
+  for spec in "${checks[@]}"; do
+    [[ -z "$spec" ]] && continue
+    run_health_check_spec "$spec" || return 1
+  done
   return 0
 }
 

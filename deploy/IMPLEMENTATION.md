@@ -74,17 +74,21 @@ Key files and responsibilities:
 
 - `deploy/lib/rollback.sh` — rollback engine. Exposes `rollback_sequence` which accepts an array of executed step script paths and calls each step's `rollback()` in reverse order. On rollback failure it writes an explicit manual-intervention marker to the state log.
 
-- `deploy/lib/security.sh` — basic sudo allowlist check heuristics. It currently examines `sudo -l` output for `centos` and tests `sudo -n -u centos true` as an existence check. Replace with a stricter check for your environment.
+- `deploy/lib/security.sh` — parses the captured `sudo -l` output (collected by `deploy.sh` before each run) and enforces that only the allowed run-as targets (`centos` by default) and commands (`/bin/bash`, `/usr/bin/bash`, `/bin/sh`, `/usr/bin/env bash`) are present. Override `ALLOWED_SUDO_TARGETS` or `ALLOWED_SUDO_COMMANDS` if your environment differs.
 
 - `deploy/lib/validation.sh` — file/ownership/XML/health-check helpers used by step `verify()` implementations. Functions exported:
-  - `validate_file_exists`, `validate_owned_by_centos`, `validate_no_world_writable`, `validate_xml`, `health_check_url`.
+  - `validate_file_exists`, `validate_owned_by_centos`, `validate_no_world_writable`, `validate_xml`, `health_check_url`, `health_check_command`, `run_health_check_spec`.
 
 - `deploy/lib/ssh.sh` — minimal SSH wrapper which enforces `StrictHostKeyChecking=yes`.
+
+- `deploy/lib/signing.sh` — signature helpers that validate artifacts against accompanying `.sha256`, `.asc`, or `.sig` files (or any explicitly provided signature path).
 
 - `deploy/inventory/prod.env` — inventory file. One host per line. Comments supported.
 
 - `deploy/apps/<app>/deploy.conf` — application config. Example variables found in the sample `loan-service`:
-  - `APP_NAME`, `JAR_NAME` (this file may reference `VERSION` which `deploy_remote.sh` exports before sourcing), `TARGET_LIB_DIR`, `TARGET_CLASSES_DIR`, `EXTRA_ZIPS`, `XML_PATH`, `XML_EDITS`, `HEALTH_URL`.
+  - `APP_NAME`, `JAR_NAME` (this file may reference `VERSION` which `deploy_remote.sh` exports before sourcing), `TARGET_LIB_DIR`, `TARGET_CLASSES_DIR`, `EXTRA_ZIPS`, `XML_PATH`, `XML_EDITS`.
+  - `HEALTH_CHECKS` array containing entries such as `url:http://localhost:8080/health` or `command:systemctl is-active loan-service >/dev/null 2>&1`.
+  - Optional signature files (`artifacts/<artifact>.sha256`, `.asc`, or `.sig`) trigger precheck validation before any artifacts are modified.
 
 - `deploy/apps/<app>/steps/*.sh` — step scripts. Must implement the contract (see below) and be idempotent where possible.
 
@@ -107,7 +111,7 @@ Examples of step behavior (see `apps/loan-service/steps`):
 - `02_unzip_classes.sh` — extracts `artifacts/classes.zip` to a temporary directory, validates structure contains `WEB-INF`, backs up existing classes dir (`classes.bak.<ts>`), and atomically moves the new dir in place.
 - `03_edit_xml.sh` — creates a timestamped backup of `application.xml` and uses `xmllint --shell` to set values (no regex). Rollback restores the latest backup.
 - `04_unzip_extra.sh` — optional extra zip extraction and merge into classes dir.
-- `99_verify.sh` — final checks: files exist, ownership, no world-writable files, xmllint validation, HTTP health-check with `curl`.
+- `99_verify.sh` — final checks: files exist, ownership, no world-writable files, xmllint validation, and runs each spec in `HEALTH_CHECKS` (URL or command-based health checks).
 
 ## Locking (mandatory)
 
@@ -120,7 +124,7 @@ Examples of step behavior (see `apps/loan-service/steps`):
 - SSH from jump server is done as the `deploy-user` (normal account). `deploy.sh` uses `ssh -o StrictHostKeyChecking=yes -o BatchMode=yes`.
 - The orchestrator never SSHes as `root` or `centos`.
 - Once connected, `deploy.sh` invokes `sudo -u centos bash -c '...deploy_remote.sh...'` on the remote host, so all file manipulations, backups, rollbacks, and validations are executed by the `centos` account.
-- `lib/security.sh` runs a heuristic check to ensure the sudo allowlist includes the centos switch; adapt this to your environment to make it strict and auditable.
+- `lib/security.sh` enforces the sudo allowlist captured from `sudo -l` before the run, rejecting any unexpected run-as targets or commands. Customize the allowlist via `ALLOWED_SUDO_TARGETS` / `ALLOWED_SUDO_COMMANDS` if your sudoers layout differs.
 
 ## Audit logging
 
@@ -133,8 +137,11 @@ Remote hosts (the VMs) must have the following utilities installed and available
 
 - `xmllint` (libxml2-utils) — required by `03_edit_xml.sh` and `validation.validate_xml`.
 - `unzip` — required by unzip steps.
-- `curl` — required for runtime health checks.
+- `curl` — required for URL-based runtime health checks.
+- `bash` — used to execute command-based health checks.
 - `sha256sum` (or `shasum -a 256` equivalent). The current scripts use `sha256sum`.
+- `base64` — used for transferring the sudo policy between orchestrator and remote runner.
+- `gpg` (optional) — required only if you ship `.asc`/`.sig` signatures for artifacts.
 
 If any remote host lacks these tools a precheck or verify will fail and rollback will be executed.
 
@@ -145,9 +152,9 @@ If any remote host lacks these tools a precheck or verify will fail and rollback
 
 ## How to add a new application
 
-1. Create `deploy/apps/<new-app>/deploy.conf` and set the required variables (target dirs, jar name format, xml path, health URL, any EXTRA_ZIPS, XML_EDITS array if you need XML edits).
+1. Create `deploy/apps/<new-app>/deploy.conf` and set the required variables (target dirs, jar name format, XML path, any `EXTRA_ZIPS`, `XML_EDITS`, and populate `HEALTH_CHECKS` with URL/command specs that make sense for the service).
 2. Implement step scripts `apps/<new-app>/steps/01_...` following the step contract. Keep the number ordering to control step sequence.
-3. Add artifacts to `deploy/artifacts/` with the expected names referenced in `deploy.conf`.
+3. Add artifacts to `deploy/artifacts/` with the expected names referenced in `deploy.conf`. Drop matching `.sha256`, `.asc`, or `.sig` files beside artifacts if you want signatures enforced.
 4. Run a dry-run and then a controlled deploy with a single or small batch.
 
 ## Troubleshooting

@@ -10,6 +10,10 @@ precheck() {
     echo "artifact_missing: $SRC" >&2
     return 1
   fi
+  if ! verify_artifact_signature "$SRC"; then
+    echo "artifact_signature_invalid: $SRC" >&2
+    return 1
+  fi
   return 0
 }
 

@@ -51,6 +51,14 @@ Planned per-VM step order:
   99_verify.sh
 ```
 
+### Demo playback
+
+Replay the included asciinema capture to observe a dry-run followed by an automatic rollback when a step fails:
+
+```bash
+asciinema play docs/demos/dry-run-rollback.cast
+```
+
 ## Additional verification you can do before a real deployment
 
 1. Confirm `deploy/artifacts/` contains the artifact names expected by `deploy/apps/<app>/deploy.conf`. In the sample `loan-service` the `JAR_NAME` is built using `VERSION`.

@@ -19,11 +19,20 @@ export DEPLOY_ID VM APP VERSION BASE_DIR WORK_DIR LIB_DIR STATE_FILE
 mkdir -p "$BASE_DIR"
 touch "$STATE_FILE"
 
+SUDO_POLICY=""
+if [[ -n "${SUDO_POLICY_B64:-}" ]]; then
+  if command -v base64 >/dev/null 2>&1; then
+    SUDO_POLICY=$(printf '%s' "$SUDO_POLICY_B64" | base64 --decode 2>/dev/null || printf '%s' "$SUDO_POLICY_B64" | base64 -d 2>/dev/null || true)
+  fi
+fi
+export SUDO_POLICY
+
 source "$LIB_DIR/logger.sh"
 source "$LIB_DIR/lock.sh"
 source "$LIB_DIR/rollback.sh"
 source "$LIB_DIR/security.sh"
 source "$LIB_DIR/validation.sh"
+source "$LIB_DIR/signing.sh"
 
 # Source app config (should set variables like JAR_NAME, TARGET_* etc). deploy.conf may reference VERSION
 if [[ -f "$WORK_DIR/deploy.conf" ]]; then

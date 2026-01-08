@@ -6,6 +6,10 @@ set -euo pipefail
 precheck() {
   # Expect a classes.zip in the bundle or artifact path named classes.zip
   if [[ -f "$BASE_DIR/artifacts/classes.zip" ]]; then
+    if ! verify_artifact_signature "$BASE_DIR/artifacts/classes.zip"; then
+      echo "classes_zip_signature_invalid" >&2
+      return 1
+    fi
     return 0
   fi
   # if no zip provided, skip this step successfully

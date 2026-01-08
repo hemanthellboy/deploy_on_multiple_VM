@@ -46,6 +46,10 @@ if [[ ! -f "$INVENTORY_FILE" ]]; then
   echo "Inventory file not found: $INVENTORY_FILE"; exit 2
 fi
 
+if ! command -v base64 >/dev/null 2>&1; then
+  echo "base64 utility is required on the jump server"; exit 2
+fi
+
 DEPLOY_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
 LOG_FILE="$ROOT_DIR/state/deployments.log"
 TMP_DIR="$ROOT_DIR/tmp"
@@ -84,16 +88,34 @@ while [[ $i -lt ${#TARGETS[@]} ]]; do
 
   echo "Starting batch $batch_count with ${#batch[@]} targets"
 
+  pid_to_vm=()
+  batch_failed=0
+
   # Launch deploy_remote.sh on each VM in background
   for vm in "${batch[@]}"; do
     outFile="$TMP_DIR/${DEPLOY_ID}_${vm//[:\/]/_}.log"
     echo " - Launching $vm -> log: $outFile"
 
+    sudo_policy_raw=$(ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "$vm" "sudo -l 2>/dev/null" || true)
+    if [[ -z "$sudo_policy_raw" ]]; then
+      echo "[ERROR] Unable to read sudo policy for $vm" | tee "$outFile"
+      vm_status[$vm]=FAILED
+      batch_failed=1
+      continue
+    fi
+    sudo_policy_b64=$(printf '%s' "$sudo_policy_raw" | base64 | tr -d '\n')
+    if [[ -z "$sudo_policy_b64" ]]; then
+      echo "[ERROR] Failed to encode sudo policy for $vm" | tee "$outFile"
+      vm_status[$vm]=FAILED
+      batch_failed=1
+      continue
+    fi
+
     # create a tarball stream of the deployment bundle and extract+run on remote as centos
     (
       tar -C "$ROOT_DIR" -cz "deploy_remote.sh" "lib" "apps/$APP" "artifacts" "state" 2>/dev/null |
       ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "$vm" \
-        "sudo -u centos bash -c 'set -euo pipefail; dst=/tmp/deploy_run_${DEPLOY_ID}; rm -rf \"$dst\"; mkdir -p \"$dst\"; tar -xz -C \"$dst\"; bash \"$dst/deploy_remote.sh\" \"$vm\" \"$APP\" \"$VERSION\" \"$DEPLOY_ID\"'" \
+        "sudo -u centos env SUDO_POLICY_B64='$sudo_policy_b64' bash -c 'set -euo pipefail; dst=/tmp/deploy_run_${DEPLOY_ID}; rm -rf \"$dst\"; mkdir -p \"$dst\"; tar -xz -C \"$dst\"; bash \"$dst/deploy_remote.sh\" \"$vm\" \"$APP\" \"$VERSION\" \"$DEPLOY_ID\"'" \
       > "$outFile" 2>&1 || echo "REMOTE_FAILED"
     ) &
     pid=$!
@@ -102,7 +124,6 @@ while [[ $i -lt ${#TARGETS[@]} ]]; do
   done
 
   # wait for all in this batch
-  batch_failed=0
   for pid in "${!pid_to_vm[@]}"; do
     vm=${pid_to_vm[$pid]}
     if ! wait "$pid"; then

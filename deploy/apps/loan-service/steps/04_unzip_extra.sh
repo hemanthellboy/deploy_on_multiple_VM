@@ -32,6 +32,10 @@ execute() {
       echo "extra_zip_missing: $z" >&2
       return 1
     fi
+    if ! verify_artifact_signature "$src"; then
+      echo "extra_zip_signature_invalid: $z" >&2
+      return 1
+    fi
 
     local tmpdir
     tmpdir=$(mktemp -d "/tmp/extra_${DEPLOY_ID}_${z//[^A-Za-z0-9]/}_XXXX")
